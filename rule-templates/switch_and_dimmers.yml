@@ -1,0 +1,300 @@
+uid: lazygatto:switch_and_dimmers
+label: Switch and Dimmers Rule
+description: Allows you simply control of switch and dimmer lights through button switches.
+configDescriptions:
+  - name: switchesGroup
+    type: TEXT
+    context: item
+    filterCriteria:
+      - name: type
+        value: Group
+    label: Switches Group
+    required: true
+    description: Group Item that holds all the Switches
+  - name: delayMulti
+    label: Short Press Delay
+    description: Delay needed to register short presses. The delay is in milliseconds.
+    type: INTEGER
+    defaultValue: 350
+    required: true
+  - name: delayDimStep
+    label: Dimmer Steps Delay
+    description: Pause between dimmer steps will be performed. The delay is in milliseconds.
+    type: INTEGER
+    defaultValue: 100
+    required: true
+  - name: dimStep
+    label: Dimmer Step Size
+    description: Step to increase/decrease dimming level for one iteration.
+    type: INTEGER
+    defaultValue: 2
+    required: true
+  - name: minDim
+    label: Dimmer Step Size
+    description: Minimum level for dimming while pressing button.
+    type: INTEGER
+    defaultValue: 5
+    required: true
+  - name: switchStateON
+    label: Switch State ON
+    description: Set here 'ON' if use Switch Type Items and 'CLOSED' if you're using Contact Type Items.
+    type: TEXT
+    defaultValue: CLOSED
+    required: true
+  - name: switchStateOFF
+    label: Switch State OFF
+    description: Set here 'OFF' if use Switch Type Items and 'OPEN' if you're using Contact Type Items.
+    type: TEXT
+    defaultValue: OPEN
+    required: true
+  - name: namespace
+    type: TEXT
+    label: Linked Item Namespace
+    required: true
+    defaultValue: linkedItem
+    description: The Item metadata namespace for enter linked Item name (e.g. "linkedItem").
+triggers:
+  - id: "1"
+    configuration:
+      groupName: "{{switchesGroup}}"
+      state: "{{switchStateON}}"
+      previousState: "{{switchStateOFF}}"
+    type: core.GroupStateChangeTrigger
+conditions: []
+actions:
+  - inputs: {}
+    id: "2"
+    configuration:
+      type: application/javascript;version=ECMAScript-2021
+      script: >-
+        /*
+        Switch and Dimmers Rule
+
+        Ver. 0.2
+
+        The MIT License (MIT)
+        Copyright © 2023 LazyGatto, 
+        based on Felix Krämer script
+        https://community.openhab.org/t/multi-press-and-hold-to-dim-js-script-for-thing-buttons/144589
+        Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+        Requirements:
+        - Javascript Automation addon (ECMA2011)
+        - Latest openhab-js installed
+        - A button items configured as switches or contacts (see below 'switchState' variable) with custom metadata (read further)
+
+        README:
+        You have to place all your switches/contacts into one group, which one will be a trigger.
+        Also you have to add custom metadata for all your switches/contacts 'linkedItem', with item name of light/dimmer it will control.
+
+        Script supports switches and dimmers.
+        For one short press:
+        - turn ON/OFF switches 
+        - turn ON/OFF dimmers with restoration of previous level of dimming.
+        For long press:
+        - switches will turn ON/OFF
+        - dimmers will increase to 100 / decrease to minDim values, stop, press and hold again button will revert dimming direction.
+
+        You can provide any custom actions for double/triple/etc presses by customizing 'shortPressAction' function and 'delayMulti'
+        variable to detect multiple buttom presses.
+
+        */
+
+        // ==== Configuration ====
+
+        // Delays:
+
+        var delayMulti = {{delayMulti}};   // registering multiple pushes
+
+        var delayDimStep = {{delayDimStep}}; // pause between in-/decrease steps
+
+        var dimStep = {{dimStep}}; // step to increase/decrease dimming level for one iteration
+
+        var minDim = {{minDim}}; // minimum level for dimming
+
+        var switchState = {
+          ON: '{{switchStateON}}', // CLOSED for Contact Type
+          OFF: '{{switchStateOFF}}' // OPEN for Contact Type
+        }
+
+        // ==== END Configuration ====
+
+        var switchTriggered = items.getItem(triggeringItem.name);
+
+        var isObjectEmpty = (objectName) => {
+          return JSON.stringify(objectName) === "{}";
+        };
+
+        // Change the behaviour for different button presses:
+        // stor.pressCount - button pressed times
+        function shortPressAction(stor) {
+
+          switch (stor.pressCount) {
+
+            // 1 press to toggle light on/off
+            case 1:
+              toggleItem(stor.linkedItem)
+              break;
+
+            // 2 presses. For now Item Toggle function is here. You can write your own.
+            case 2:
+              if ('p2' in stor.linkedItem) {
+                toggleItem(stor.linkedItem.p2)
+              } else {
+                console.log('There is no action for 2 presses for ' + stor.switchTriggered.name)
+              }
+              break;
+
+            // 3 presses. For now Item Toggle function is here. You can write your own.
+            case 3:
+              if ('p3' in stor.linkedItem) {
+                toggleItem(stor.linkedItem.p3)
+              } else {
+                console.log('There is no action for 3 presses for ' + stor.switchTriggered.name)
+              }
+              break;
+
+            default:
+              console.log('Default case');
+          }
+        }
+
+        function resetStorage(stor) {
+          stor.btnTimer = null;
+          stor.pressCount = 0;
+          stor.dimTimer = null;
+          cache.private.put(stor.cacheId, stor);
+        }
+
+        function toggleItem(itemObj) {
+
+          var stateToSet = null
+
+          if (itemObj.state == 'OFF') {
+            stateToSet = 'ON'
+          } else if (itemObj.state == 0) {
+            stateToSet = ("previousState" in itemObj) ? itemObj.previousState : 100;
+          } else {
+            itemObj.previousState = itemObj.state
+            stateToSet = 'OFF'
+          }
+          itemObj.sendCommand(stateToSet)
+        }
+
+        function dimItem(stor) {
+
+          var dimToSet = null;
+
+          //early exit
+          if (stor.switchTriggered.state.toString() == switchState.OFF) {
+            resetStorage(stor);
+            return;
+          }
+
+          if (stor.dimUp == true) {
+            dimToSet = Number(stor.linkedItem.state) + dimStep;
+            if (dimToSet > 100) {
+              dimToSet = 100
+              resetStorage(stor);
+            }
+
+          } else {
+            dimToSet = Number(stor.linkedItem.state) - dimStep;
+            if (dimToSet < minDim) {
+              dimToSet = minDim
+              resetStorage(stor);
+            }
+
+          }
+          stor.linkedItem.sendCommand(dimToSet);
+
+          if (stor.dimTimer) {
+            stor.dimTimer.reschedule(time.toZDT(delayDimStep));
+          }
+        }
+
+        function getPressCountTimer(stor) {
+
+          if (stor.switchTriggered.state.toString() == switchState.OFF) { // Short press cases
+
+            shortPressAction(stor);
+            resetStorage(stor);
+
+          } else { // Hold cases
+
+            resetStorage(stor);
+
+            switch (stor.linkedItem.type) {
+
+              case 'SwitchItem':
+                if ('hold' in stor.linkedItem) {
+                  toggleItem(stor.linkedItem.hold)
+                } else {
+                  toggleItem(stor.linkedItem)
+                }
+                break;
+
+              case 'DimmerItem':
+                // Set dim direction
+                if (stor.linkedItem.state > 90) {
+                  stor.dimUp = false;
+                } else if (stor.linkedItem.state < 10) {
+                  stor.dimUp = true;
+                } else {
+                  stor.dimUp = !stor.dimUp
+                }
+
+                if (stor.dimTimer === null) {
+                  stor.dimTimer = actions.ScriptExecution.createTimer(stor.dimTimerId, time.toZDT(), () => { dimItem(stor) });
+                }
+                cache.private.put(stor.cacheId, stor);
+                break;
+            }
+
+          }
+        }
+
+        if (switchTriggered.state.toString() == switchState.ON) {
+          var funcGenerator = function (switchTriggered) {
+            var cacheId = switchTriggered.name + '_Id';
+
+            switchTriggered.meta = items.metadata.getMetadata(switchTriggered, 'linkedItem');
+
+            if (switchTriggered.meta == null) {
+              console.error(switchTriggered.name + ' has no linkedItem namespace specified! Exit...')
+              return
+            }
+
+            var linkedItem = items.getItem(switchTriggered.meta.value);
+
+            if (!isObjectEmpty(switchTriggered.meta.configuration)) {
+              if ("p2" in switchTriggered.meta.configuration) {
+                linkedItem.p2 = items.getItem(switchTriggered.meta.configuration.p2)
+              }
+              if ("p3" in switchTriggered.meta.configuration) {
+                linkedItem.p3 = items.getItem(switchTriggered.meta.configuration.p3)
+              }
+              if ("hold" in switchTriggered.meta.configuration) {
+                linkedItem.hold = items.getItem(switchTriggered.meta.configuration.hold);
+              }
+            }
+
+            var stor = cache.private.get(cacheId, () => ({
+              'cacheId': cacheId,
+              'switchTriggered': switchTriggered,
+              'linkedItem': linkedItem,
+              'btnTimer': null,
+              'pressCount': 0,
+              'dimTimer': null,
+              'dimTimerId': linkedItem.name + '_dimTimerId',
+              'dimUp': false,
+            }));
+            stor.pressCount++;
+            if (stor.btnTimer !== null) {
+              clearTimeout(stor.btnTimer);
+            }
+            stor.btnTimer = setTimeout(() => getPressCountTimer(stor), delayMulti);
+          }
+          funcGenerator(switchTriggered);
+        }
+    type: script.ScriptAction
